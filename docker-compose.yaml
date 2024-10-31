@@ -1,0 +1,162 @@
+services:
+  pingfederateconsole:
+    container_name: dpq-pingfederateconsole
+    image: pingidentity/pingfederate:12.1.3-alpine_3.20.3-al11-edge
+    ports:
+      - "9031:9031/tcp"
+      - "9999:9999/tcp"
+    env_file:
+      - .env/pingdevops.yaml
+    environment:
+      DNS_QUERY_LOCATION: pingfederateconsole.localdev
+      PF_RUN_PF_OPERATIONAL_MODE: STANDALONE
+      PING_IDENTITY_ACCEPT_EULA: YES
+      PING_IDENTITY_PASSWORD: Passw0rd
+      SERVER_PROFILE_PATH: pingfederate/console 
+      SERVER_PROFILE_URL: https://github.com/darkedges/docker-ping-gettingstarted.git
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.pfconsole-service.loadbalancer.server.port=9999"
+      - "traefik.http.services.pfconsole-service.loadbalancer.server.scheme=https"
+      - "traefik.http.routers.pfconsole-router.rule=Host(`pfconsole.traefik.me`)"
+      - "traefik.http.routers.pfconsole-router.tls.domains[0].main=pfconsole.traefik.me"
+      - "traefik.http.routers.pfconsole-router.entrypoints=websecure"
+      - "traefik.http.routers.pfconsole-router.service=pfconsole-service"
+    healthcheck:
+      test: curl --fail -k https://localhost:9031/pf/heartbeat.ping || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      localdev:
+        aliases: 
+        - pingfederateconsole.localdev
+  # pingfederateengine:
+  #   hostname: "{{.Service.Name}}-{{.Task.Slot}}.mydomain.com"
+  #   image: pingidentity/pingfederate:12.1.3-alpine_3.20.3-al11-edge
+  #   env_file:
+  #     - .env/pingdevops.yaml
+  #   environment:
+  #     DISCOVERY_INITIAL_HOST: pingfederateconsole.localdev:7600
+  #     DNS_QUERY_LOCATION: pingfederateconsole.localdev
+  #     PF_RUN_PF_OPERATIONAL_MODE: CLUSTERED_ENGINE
+  #     PING_IDENTITY_ACCEPT_EULA: YES
+  #     SERVER_PROFILE_PATH: pingfederate/engine 
+  #     SERVER_PROFILE_URL: https://github.com/darkedges/docker-ping-gettingstarted.git
+  #   networks:
+  #     localdev:
+  #       aliases: 
+  #       - 'pingfederateengine-{{.Task.Slot}}.localdev'
+  #   deploy:
+  #     mode: replicated
+  #     replicas: 1
+  pingaccess:
+    container_name: dpq-pingaccess
+    image: pingidentity/pingaccess:edge
+    env_file:
+      - .env/pingdevops.yaml
+    environment:
+      PING_IDENTITY_ACCEPT_EULA: YES 
+      PING_IDENTITY_PASSWORD: Passw0rd
+      SERVER_PROFILE_PATH: pingaccess 
+      SERVER_PROFILE_URL: https://github.com/darkedges/docker-ping-gettingstarted.git
+    ports:
+      - 9000:9000
+      - 1443:1443
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.pingaccess-service.loadbalancer.server.port=9000"
+      - "traefik.http.services.pingaccess-service.loadbalancer.server.scheme=https"
+      - "traefik.http.routers.pingaccess-router.rule=Host(`pingaccess.traefik.me`)"
+      - "traefik.http.routers.pingaccess-router.tls.domains[0].main=pingaccess.traefik.me"
+      - "traefik.http.routers.pingaccess-router.entrypoints=websecure"
+      - "traefik.http.routers.pingaccess-router.service=pingaccess-service"
+      - "traefik.http.services.www-service.loadbalancer.server.port=3000"
+      - "traefik.http.services.www-service.loadbalancer.server.scheme=https"
+      - "traefik.http.routers.www-router.rule=Host(`www.traefik.me`)"
+      - "traefik.http.routers.www-router.tls.domains[0].main=www.traefik.me"
+      - "traefik.http.routers.www-router.entrypoints=websecure"
+      - "traefik.http.routers.www-router.service=www-service"
+      - "traefik.http.services.pfruntime-service.loadbalancer.server.port=3000"
+      - "traefik.http.services.pfruntime-service.loadbalancer.server.scheme=https"
+      - "traefik.http.routers.pfruntime-router.rule=Host(`pfruntime.traefik.me`)"
+      - "traefik.http.routers.pfruntime-router.tls.domains[0].main=pfruntime.traefik.me"
+      - "traefik.http.routers.pfruntime-router.entrypoints=websecure"
+      - "traefik.http.routers.pfruntime-router.service=pfruntime-service"
+    depends_on:
+      pingfederateconsole:
+        condition: service_healthy
+    networks:
+      localdev:
+        aliases: 
+        - pingaccess.localdev
+  traefik:
+    restart: unless-stopped
+    image: traefik:v3.1
+    command: 
+      - "--log.level=DEBUG"
+      - "--api.insecure=true"
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.file.filename=/etc/traefik/tls.yml"
+      - "--entryPoints.web.address=:80"
+      - "--entryPoints.websecure.address=:443"
+      - "--serverstransport.insecureskipverify=true"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./traefik/tls.yml:/etc/traefik/tls.yml
+      - /var/run/docker.sock:/var/run/docker.sock
+      - certs:/etc/ssl/traefik
+    networks:
+      localdev:
+        aliases: 
+        - traefik.localdev
+        - pfruntime.traefik.me
+  app1:
+    image: traefik/whoami
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app1.rule=Host(`app1.traefik.me`)"
+      - "traefik.http.routers.app1.tls.domains[0].main=app1.traefik.me"
+      - "traefik.http.routers.app1.entrypoints=websecure"
+    networks:
+      localdev:
+        aliases: 
+        - app1.localdev
+  app2:
+    image: jmalloc/echo-server
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app2.rule=Host(`app2.traefik.me`)"
+      - "traefik.http.routers.app2.tls.domains[0].main=app2.traefik.me"
+      - "traefik.http.routers.app2.entrypoints=websecure"
+    networks:
+      localdev:
+        aliases: 
+        - app2.localdev
+  reverse-proxy-https-helper:
+    image: alpine
+    command: sh -c "cd /etc/ssl/traefik
+      && wget traefik.me/cert.pem -O cert.pem
+      && wget traefik.me/privkey.pem -O privkey.pem"
+    volumes:
+      - certs:/etc/ssl/traefik
+  api:
+    image: "darkedges/providerapi:latest"
+    build:
+      context: docker/api
+    ports: 
+      - "8080:8080"
+    networks:
+      localdev:
+        aliases:
+          - providerapi.localdev
+    volumes: 
+      - ./providerapi/:/app/data
+volumes:
+  certs:
+networks:
+  localdev:
