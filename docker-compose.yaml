@@ -146,8 +146,6 @@ services:
       - certs:/etc/ssl/traefik
   api:
     image: "darkedges/providerapi:latest"
-    build:
-      context: docker/api
     ports: 
       - "8080:8080"
     networks:
